@@ -1,12 +1,13 @@
 import request from 'request'
 import api from './api'
 
-const common_header = {
+let common_header = {
     'User-Agent': '5.0 (Macintosh; Intel Mac OS X 10_13_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/64.0.3282.167 Safari/537.36',
     'Accept-Encoding': '*',
     'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7,zh-TW;q=0.6'
 }
 
+//process control
 let mapLimit = async (list, limit, asyncHandle) => {
     let recursion = (arr) => {
         return asyncHandle(arr.shift()).then((data)=>{
@@ -25,11 +26,33 @@ let mapLimit = async (list, limit, asyncHandle) => {
     return processArr
 }
 
-function _randomAvatar() {
+//get authorization
+async function autoLogin() {
+    return new Promise((resolve, reject) => {
+        request({
+            uri: api.CONDORDIA_USER_LOGIN(),
+            headers: common_header,
+            method: 'POST',
+            form: {
+                email: 'user0@cozystay.com',
+                password: '123456'
+            }
+        }, (error, response, body) => {
+            let resData = JSON.parse(body)
+            if(resData.code === 0){
+                resolve(response.headers.authorization)
+            }
+        })
+    })
+}
+
+//set avatar
+function randomAvatar() {
     let genders = ['men', 'women']
     return api.RANDOM_AVATAR_GENERATOR(genders[~~(Math.random() * 2)], ~~(Math.random() * 99))
 }
 
+//find or create a user
 async function createUserByCountry(country, listingCount) {
     let registerUser = async (nickName, email, password) => {
         return new Promise((resolve, reject) => {
@@ -46,7 +69,7 @@ async function createUserByCountry(country, listingCount) {
                     userInfo: {
                         nick_name: '',
                         first_name: '',
-                        avatar: _randomAvatar(),
+                        avatar: randomAvatar(),
                         preferred_locale: 'cn'
                     }
                 }
@@ -57,10 +80,11 @@ async function createUserByCountry(country, listingCount) {
     }
 }
 
+//get country list
 function getCountryList() {
     return new Promise((resolve, reject) => {
         request({
-            uri: 'http://www.duomiyou.com/api/pc/Product.svc/Get_ProductSearchDetailList',
+            uri: api.DUOMIYOU_COUNTRY_LIST(),
             headers: common_header
         }, (error, response, body) => {
             if (!error && (response.statusCode >= 200 && response.statusCode < 300)) {
@@ -72,11 +96,12 @@ function getCountryList() {
     })
 }
 
+//get listing's id
 async function getListingsByCountry(country, pageSize) {
     let listingByPage = async (currentPage) => {
         return new Promise((resolve, reject) => {
             request({
-                uri: 'http://www.duomiyou.com/api/pc/Product.svc/Get_ProductSearchList',
+                uri: api.DUOMIYOU_GET_LISTING_BY_COUNTRY(),
                 qs: {
                     placeId: country.id,
                     themeTypeId: '',
@@ -121,10 +146,11 @@ async function getListingsByCountry(country, pageSize) {
     }
 }
 
+//concat a listing array
 function getListingDetail(listingId) {
     return new Promise((resolve, reject) => {
         request({
-            uri: 'http://www.duomiyou.com/api/pc/Product.svc/Get_ProductDetail',
+            uri: api.DUOMIYOU_GET_LISTING_DETAIL(),
             qs: {
                 id: listingId,
                 signature: ''
@@ -140,15 +166,22 @@ function getListingDetail(listingId) {
     })
 }
 
-function storeListingToDB(listingDetail) {
+//store listing into eadu's db
+function storeListingToDB(listingDetail, authorization) {
     return new Promise((resolve, reject) => {
+        console.log(`store a new listing: ${listingDetail.dtImportantParameter[0].name}`)
 
+        resolve([])
     })
 }
 
 (async function() {
+    const authorization = await autoLogin()
     const countryList = await getCountryList()
+
     const listingArr = await mapLimit(countryList, 5, (country) => getListingsByCountry(country, 30))
-    const listingDetailArr = await mapLimit(listingArr, 15, (listing) => getListingDetail(listing.id))
-    await mapLimit(listingDetailArr, 2, (listing) => storeListingToDB(listing))
+
+    const listingDetailArr = await mapLimit(listingArr, 10, (listing) => getListingDetail(listing.id))
+
+    await mapLimit(listingDetailArr, 2, (listing) => storeListingToDB(listing, authorization))
 }())
