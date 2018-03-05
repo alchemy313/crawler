@@ -45,9 +45,9 @@ async function autoLogin(userForm) {
         }, (error, response, body) => {
             let resData = JSON.parse(body)
             if(resData.code === 0){
-                resolve(resData.id)
+                resolve(resData.data.id)
             }else{
-                reject(resData.detail)
+                reject(resData.message)
             }
         })
     })
@@ -74,7 +74,7 @@ async function getPropertyTypeId(name) {
 async function getCancellationPolicyID(name) {
     return new Promise((resolve, reject) => {
         if (cancellationPolicyID.length) resolve(cancellationPolicyID)
-        reject({
+        request({
             uri: api.CONDORDIA_GET_CANCELLATION_POLICIES(),
             headers: Object.assign(common_header, {'coz-lang':'zh-cn'}),
         }, (error, response, body) => {
@@ -372,12 +372,13 @@ function storeListingToDB(listingDetail, userId) {
     })
     console.log('抓取进程数:', argv.concurrency, '存储进程数', argv.store_concurrency)
     const userId = await autoLogin(user)
+    console.log('后台管理员登录完成....')
     const countryList = await getCountryList()
     console.log('获取国家列表完成....')
     const listingArr = await mapLimit(countryList, 10, (country) => getListingsByCountry(country, 30))
-    console.log('获取房源信息完成....')
-    const listingDetailArr = await mapLimit(listingArr, argv.concurrency, (listing) => getListingDetail(listing.id))
-    console.log('获取房源详情列表完成.... 列表数:', listingDetailArr.length, '开始储存房源详情')
+    console.log('获取房源列表完成....  开始获取房源详情....')
+    const listingDetailArr = await mapLimit(listingArr.splice(0,10), argv.concurrency, (listing) => getListingDetail(listing.id))
+    console.log('获取房源详情列表完成.... 房源数:', listingDetailArr.length, '开始储存房源详情....')
     await mapLimit(listingDetailArr, argv.store_concurrency, (listing) => storeListingToDB(listing, userId))
     console.log('完成所有抓取')
 }())

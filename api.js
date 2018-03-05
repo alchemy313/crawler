@@ -1,10 +1,4 @@
-const env = {
-    path: {
-        condordia: 'http://localhost:80/api/v2',
-        eadu: 'http://localhost:30081/v2',
-        jakku: 'http://localhost:30083/v2'
-    }
-}
+import env from './env.json'
 
 export default {
     DUOMIYOU_COUNTRY_LIST: () => {
