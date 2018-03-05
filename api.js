@@ -22,6 +22,12 @@ export default {
     CONDORDIA_USER_LOGIN: () => {
         return `${env.path.condordia}/admin/auth/login/email`
     },
+    CONDORDIA_GET_PROPERTY_TYPES: () => {
+        return `${env.path.condordia}/property_types?limit=100`
+    },
+    CONDORDIA_GET_CANCELLATION_POLICIES: () => {
+        return `${env.path.condordia}/cancellation_policies`
+    },
     EADU_ADD_LISTING: () => {
         return `${env.path.eadu}/listings`
     },

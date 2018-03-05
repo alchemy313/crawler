@@ -1,11 +1,16 @@
 import request from 'request'
+import minimist from 'minimist'
 import api from './api'
+import user from './user.json'
 
 let common_header = {
     'User-Agent': '5.0 (Macintosh; Intel Mac OS X 10_13_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/64.0.3282.167 Safari/537.36',
     'Accept-Encoding': '*',
     'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7,zh-TW;q=0.6'
 }
+
+let propertyTypeID = ""
+let cancellationPolicyID = ""
 
 //process control
 let mapLimit = async (list, limit, asyncHandle) => {
@@ -29,21 +34,54 @@ let mapLimit = async (list, limit, asyncHandle) => {
     return processArr
 }
 
-//get authorization
-async function autoLogin() {
+//get userId
+async function autoLogin(userForm) {
     return new Promise((resolve, reject) => {
         request({
             uri: api.CONDORDIA_USER_LOGIN(),
             headers: common_header,
             method: 'POST',
-            form: {
-                email: 'user0@cozystay.com',
-                password: '123456'
-            }
+            form: userForm
         }, (error, response, body) => {
             let resData = JSON.parse(body)
             if(resData.code === 0){
-                resolve(response.headers.authorization)
+                resolve(resData.id)
+            }else{
+                reject(resData.detail)
+            }
+        })
+    })
+}
+
+async function getPropertyTypeId(name) {
+    return new Promise((resolve, reject) => {
+        if (propertyTypeID.length) resolve(propertyTypeID)
+        request({
+            uri: api.CONDORDIA_GET_PROPERTY_TYPES(),
+            headers: Object.assign(common_header, {'coz-lang':'zh-cn'}),
+        }, (error, response, body) => {
+            let resData = JSON.parse(body)
+            if (resData.code === 0) {
+                propertyTypeID = resData.data.find(e => e.name === name).id
+                resolve (propertyTypeID)
+            }else{
+                reject(resData.detail)
+            }
+        })
+    })
+}
+
+async function getCancellationPolicyID(name) {
+    return new Promise((resolve, reject) => {
+        if (cancellationPolicyID.length) resolve(cancellationPolicyID)
+        reject({
+            uri: api.CONDORDIA_GET_CANCELLATION_POLICIES(),
+            headers: Object.assign(common_header, {'coz-lang':'zh-cn'}),
+        }, (error, response, body) => {
+            let resData = JSON.parse(body)
+            if (resData.code === 0) {
+                propertyTypeID = resData.data.find(e => e.name === name).id
+                resolve (propertyTypeID)
             }else{
                 reject(resData.detail)
             }
@@ -147,7 +185,6 @@ async function getListingsByCountry(country, pageSize) {
     }
 
     let firstCrawlerData = await listingByPage(1)
-    await createUserByCountry(country, firstCrawlerData.maxRank)
     const remainListingSize = firstCrawlerData.maxRank - pageSize
     const times = remainListingSize/pageSize
     if(times){
@@ -183,15 +220,17 @@ function getListingDetail(listingId) {
 }
 
 //store listing into eadu's db
-function storeListingToDB(listingDetail) {
+function storeListingToDB(listingDetail, userId) {
     const photoArr = listingDetail.dtImportantParameter[0].picture.split(',').filter(e => e.length).map(e => api.DUOMIYOU_CONCAT_PHOTO_URL(e))
     return new Promise( async (resolve, reject) => {
         let storeListingBasicInfo = () => {
-            return new Promise(resolve => {
+            return new Promise( async resolve => {
+                const propertyTypeId = await getPropertyTypeId('别墅')
+                const cancellationPolicyId = await getCancellationPolicyID('严苛的')
                 const listingBasicInfo = {
-                    host_id: 'b631d230-4d6a-4146-b6db-a96be3c2b246',
-                    cancellation_policy_id: '3d43b409-f7e5-47e7-879e-e24bb140430a',
-                    property_type_id: '61df5900-1dbf-11e8-8793-ff13d632195a',
+                    host_id: userId,
+                    cancellation_policy_id: cancellationPolicyId,
+                    property_type_id: propertyTypeId,
                     title: listingDetail.dtImportantParameter[0].name,
                     description: getPureText(listingDetail.dtImportantParameter[0].contentIntroduction),
                     room_type: 'ENTIRE_HOME',
@@ -327,16 +366,18 @@ function storeListingToDB(listingDetail) {
 
 //crawler work flow
 (async function() {
-    // const authorization = await autoLogin()
+    const argv = minimist(process.argv.slice(2), {
+        alias: { c: ['concurrency'],  s: ['store_concurrency'], },
+        default: { concurrency: 15, store_concurrency: 5 },
+    })
+    console.log('抓取进程数:', argv.concurrency, '存储进程数', argv.store_concurrency)
+    const userId = await autoLogin(user)
     const countryList = await getCountryList()
     console.log('获取国家列表完成....')
     const listingArr = await mapLimit(countryList, 10, (country) => getListingsByCountry(country, 30))
     console.log('获取房源信息完成....')
-    // const listingDetailArr = await mapLimit(listingArr, 10, (listing) => getListingDetail(listing.id))
-    // await mapLimit(listingDetailArr, 2, (listing) => storeListingToDB(listing, authorization))
-
-    const listingDetailArr = await mapLimit(listingArr.slice(40,120), 15, (listing) => getListingDetail(listing.id))
+    const listingDetailArr = await mapLimit(listingArr, argv.concurrency, (listing) => getListingDetail(listing.id))
     console.log('获取房源详情列表完成.... 列表数:', listingDetailArr.length, '开始储存房源详情')
-    await mapLimit(listingDetailArr.slice(0,80), 5, (listing) => storeListingToDB(listing))
+    await mapLimit(listingDetailArr, argv.store_concurrency, (listing) => storeListingToDB(listing, userId))
     console.log('完成所有抓取')
 }())
